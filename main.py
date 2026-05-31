@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, Streamin
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mail import FastMail, MessageSchema
 from requests import session
-from sqlalchemy import Column, DateTime, Integer, String, func,create_engine
+from sqlalchemy import Column, DateTime, Integer, String, func,create_engine,Text
 from sqlalchemy.orm import Session, declarative_base,sessionmaker
 from passlib.context import CryptContext
 from jose import JWTError, jwt
@@ -742,11 +742,13 @@ async def predict(
         savings = float(
             df[df["decision"] == "BLOCK_COD"]["order_value"].sum() * 0.6 * 0.5
         )
+        
+        import json
 
         # ✅ save summary
         prediction = Prediction(
             user_id=user.id,
-            file_id=str(output_path),
+            file_id=unique_id,
             total_orders=len(df),
             risky_orders=len(df[df["decision"] == "BLOCK_COD"]),
             verify_orders=len(df[df["decision"] == "VERIFY"]),
@@ -808,23 +810,29 @@ async def predict(
 @app.get("/download/{file_id}")
 def download_file(
     file_id: str,
-    user: User = Depends(get_current_user)
-):   
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    file_path = f"output_{file_id}.csv"
-    print("Looking for file:", file_path)
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    prediction = db.query(Prediction).filter(
+        Prediction.file_id == file_id,
+        Prediction.user_id == user.id
+    ).first()
 
-    if not os.path.exists(file_path):
+    if not prediction or not prediction.result_json:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "file_missing", "message": "File no longer available. Please run prediction again."}
+        )
 
-        return {
-        "error": "file_missing",
-        "message": "This file is no longer available. Please run prediction again."
-        }
+    df = pd.read_json(prediction.result_json)
+    csv_buffer = io.StringIO()
+    df.to_csv(csv_buffer, index=False)
+    csv_buffer.seek(0)
 
-    return FileResponse(
-        file_path,
-        media_type='text/csv',
-        filename="prediction_results.csv"
+    return StreamingResponse(
+        io.BytesIO(csv_buffer.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=prediction_results.csv"}
     )
 
 

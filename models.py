@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime,Boolean,ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime,Boolean,ForeignKey,Text
 from database import Base
 from datetime import datetime
 
@@ -52,6 +52,7 @@ class Prediction(Base):
     potential_savings = Column(Float)
     file_id = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
+    result_json = Column(Text, nullable=True)
 
 class PredictionLog(Base):
     __tablename__ = "prediction_logs"
