@@ -1,0 +1,1 @@
+["is_cod", "is_new_customer", "previous_rto_flag", "many_payment_attempts", "cod_high_value", "order_value", "estimated_delivery_days", "address_quality", "rto_rate_customer", "pincode_risk", "courier_performance", "city_risk", "device_risk", "channel_risk", "day_risk"]

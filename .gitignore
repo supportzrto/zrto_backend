@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environment
+venv/
+env/
+.venv/
+
+# Environment Variables
+.env
+.env.*
+
+# Database
+*.db
+test.db
+
+# Logs
+logs.txt
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# CSV Outputs
+output.csv
+output2.csv
+output3.csv
+final_predictions.csv
+full_predictions_debug.csv
+
+# Excel Files
+*.xlsx
+
+*.ipynb
+*.csv
+data/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
+
+# Build
+dist/
+build/
