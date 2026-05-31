@@ -1042,19 +1042,22 @@ def export_leads(user: User = Depends(get_current_user), db: Session = Depends(g
 
 
 @app.get("/api/stats")
-def get_user_stats(
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+def get_user_stats(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from sqlalchemy import func
+    totals = db.query(
+        func.sum(Prediction.risky_orders),
+        func.sum(Prediction.verify_orders),
+        func.sum(Prediction.safe_orders),
+        func.sum(Prediction.potential_savings)
+    ).filter(Prediction.user_id == user.id).first()
+
     return {
         "total_predictions": user.usage_count,
-        "risky_orders": 0,  
-        "verify_orders": 0,
-        "safe_orders": 0,
-
-       
+        "risky_orders": int(totals[0] or 0),
+        "verify_orders": int(totals[1] or 0),
+        "safe_orders": int(totals[2] or 0),
         "plan": user.plan,
-        "expiry":user.subscription_end
+        "expiry": user.subscription_end
     }
 
 @app.get("/api/history")
