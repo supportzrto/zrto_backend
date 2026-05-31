@@ -48,3 +48,7 @@ Thumbs.db
 # Build
 dist/
 build/
+# Node
+node_modules/
+package.json
+package-lock.json
