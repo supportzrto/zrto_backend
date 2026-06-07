@@ -734,6 +734,10 @@ async def predict(
         # ✅ run prediction
         df = run_prediction_pipeline(df)
 
+        import json
+
+        result_json = df.to_json(orient="records")
+
         unique_id = str(uuid.uuid4())
         output_path = get_output_path(user.id)
 
@@ -743,7 +747,7 @@ async def predict(
             df[df["decision"] == "BLOCK_COD"]["order_value"].sum() * 0.6 * 0.5
         )
         
-        import json
+        
 
         # ✅ save summary
         prediction = Prediction(
@@ -753,7 +757,8 @@ async def predict(
             risky_orders=len(df[df["decision"] == "BLOCK_COD"]),
             verify_orders=len(df[df["decision"] == "VERIFY"]),
             safe_orders=len(df[df["decision"] == "ALLOW"]),
-            potential_savings=savings
+            potential_savings=savings,
+            result_json=result_json
         )
 
         db.add(prediction)
