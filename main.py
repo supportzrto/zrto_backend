@@ -920,6 +920,7 @@ def get_current_user_data(
         "phone": current_user.phone,
         "email": current_user.email,
         "plan": current_user.plan,
+        "role": current_user.role,
         "expiry": current_user.subscription_end
     }
 
