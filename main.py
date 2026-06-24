@@ -43,6 +43,7 @@ from whatsapp.integration import (
     build_prediction_records,
     batch_auto_verify
 )
+from whatsapp.routes import router as whatsapp_router
 from whatsapp.models import Brand, VerificationOrder, MessageLog, ProcessedWebhook
 import pandas as pd
 import shutil
@@ -243,6 +244,8 @@ def cleanup_old_files():
 
 router = APIRouter()
 app = FastAPI()
+
+app.include_router(whatsapp_router)
 
 cleanup_thread = threading.Thread(target=cleanup_old_files, daemon=True)
 cleanup_thread.start()
