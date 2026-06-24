@@ -27,7 +27,12 @@ from email.mime.text import MIMEText
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
 
-
+from whatsapp.models import (
+    Brand,
+    VerificationOrder,
+    MessageLog,
+    ProcessedWebhook
+)
 import pandas as pd
 import shutil
 import os
