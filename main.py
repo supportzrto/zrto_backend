@@ -3,42 +3,54 @@ import io
 from pathlib import Path
 
 
-
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Request, Depends, Header
-from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, StreamingResponse
+from fastapi import (
+    FastAPI,
+    UploadFile,
+    File,
+    BackgroundTasks,
+    HTTPException,
+    Request,
+    Depends,
+    Header,
+)
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    HTMLResponse,
+    StreamingResponse,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mail import FastMail, MessageSchema
 from requests import session
-from sqlalchemy import Column, DateTime, Integer, String, func,create_engine,Text
-from sqlalchemy.orm import Session, declarative_base,sessionmaker
+from sqlalchemy import Column, DateTime, Integer, String, func, create_engine, Text
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from datetime import datetime, timedelta,date
-from pydantic import BaseModel ,EmailStr
+from datetime import datetime, timedelta, date
+from pydantic import BaseModel, EmailStr
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks
-from fastapi import Response,HTTPException,Depends
+from fastapi import Response, HTTPException, Depends
 from cryptography.fernet import Fernet
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
-
-from whatsapp.models import (
-    Brand,
-    VerificationOrder,
-    MessageLog,
-    ProcessedWebhook
+from whatsapp.integration import (
+    build_prediction_records,
+    batch_auto_verify
 )
+from whatsapp.models import Brand, VerificationOrder, MessageLog, ProcessedWebhook
 import pandas as pd
 import shutil
 import os
 import uuid
 import time
 import threading
+
 # import jwt
 import smtplib
 import random
@@ -47,23 +59,16 @@ import razorpay
 
 
 from logger import log
-from database import engine, Base, SessionLocal,engine
-from models import Payment, User, Prediction, APILog,PredictionLog,EarlyAccess
-from email_utils import send_verification_email,send_otp_email,conf
+from database import engine, Base, SessionLocal, engine
+from models import Payment, User, Prediction, APILog, PredictionLog, EarlyAccess
+from email_utils import send_verification_email, send_otp_email, conf
 
-from fastapi import APIRouter,Request
+from fastapi import APIRouter, Request
 from utils.file_manager import get_output_path
-from predict import (
-    run_prediction_pipeline,
-    predict_orders,
-    calculate_savings,
-    model
-)
+from predict import run_prediction_pipeline, predict_orders, calculate_savings, model
 
 env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=env_path)
-
-
 
 
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
@@ -79,18 +84,21 @@ Base.metadata.create_all(bind=engine)
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
+
 def hash_password(password):
     return pwd_context.hash(password)
 
+
 def verify_password(plain, hashed):
     return pwd_context.verify(plain, hashed)
+
 
 def hash_otp(otp: str):
     return hashlib.sha256(otp.encode()).hexdigest()
 
 
-SECRET_KEY = os.getenv('JWT_SECRET')
-ALGORITHM = os.getenv('JWT_ALGORITHM')
+SECRET_KEY = os.getenv("JWT_SECRET")
+ALGORITHM = os.getenv("JWT_ALGORITHM")
 
 # def send_email_otp(to_email, otp):
 #     sender = os.getenv("MAIL_USERNAME")
@@ -113,11 +121,13 @@ ALGORITHM = os.getenv('JWT_ALGORITHM')
 #     except Exception as e:
 #         print("Email error:", e)
 
+
 def create_token(data: dict):
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=1440)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
 
 def decode_token(token: str):
     try:
@@ -126,6 +136,7 @@ def decode_token(token: str):
     except JWTError:
         return None
 
+
 def get_db():
     db = SessionLocal()
     try:
@@ -133,13 +144,14 @@ def get_db():
     finally:
         db.close()
 
+
 def check_and_update_subscription(user, db):
     if user.subscription_end and user.subscription_end < datetime.utcnow():
         user.plan = "free"
         user.plan_limit = 50
         user.used_predictions = 0
         db.commit()
-        
+
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):
     token = request.cookies.get("access_token")
@@ -156,10 +168,12 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
 
     return user
 
+
 def get_admin_user(user: User = Depends(get_current_user)):
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Not authorized")
     return user
+
 
 def admin_required(user: User = Depends(get_current_user)):
     if user.role != "admin":
@@ -171,10 +185,9 @@ def predict_orders_df(df):
 
     if "order_value" not in df.columns and "total_amount" in df.columns:
         df["order_value"] = df["total_amount"]
-    
+
     if "order_id" not in df.columns and "customer_id" in df.columns:
         df["order_id"] = df["customer_id"]
-
 
     def get_decision(row):
         if row["order_value"] > 1500:
@@ -186,11 +199,9 @@ def predict_orders_df(df):
 
     df["decision"] = df.apply(get_decision, axis=1)
 
-    df["risk_level"] = df["decision"].map({
-        "BLOCK_COD": "HIGH",
-        "VERIFY": "MEDIUM",
-        "ALLOW": "LOW"
-    })
+    df["risk_level"] = df["decision"].map(
+        {"BLOCK_COD": "HIGH", "VERIFY": "MEDIUM", "ALLOW": "LOW"}
+    )
 
     return df
 
@@ -201,7 +212,7 @@ def run_prediction(input_path, output_path):
     finally:
         if os.path.exists(input_path):
             os.remove(input_path)
-            
+
 
 def save_predictions(df, user_id):
     db = SessionLocal()
@@ -212,9 +223,10 @@ def save_predictions(df, user_id):
             order_id=str(row["order_id"]),
             risk_level=row["risk_level"],
             order_value=float(row["order_value"]),
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
         )
         db.add(pred)
+
 
 def cleanup_old_files():
     while True:
@@ -228,6 +240,7 @@ def cleanup_old_files():
                     print(f"Deleted old file: {file}")
         time.sleep(3600)
 
+
 router = APIRouter()
 app = FastAPI()
 
@@ -237,7 +250,7 @@ cleanup_thread.start()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['http://localhost:5173', "https://zrto-app.vercel.app"],
+    allow_origins=["http://localhost:5173", "https://zrto-app.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -245,7 +258,10 @@ app.add_middleware(
 
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, lambda request, exc: JSONResponse({"error": "Rate limit exceeded"}))
+app.add_exception_handler(
+    RateLimitExceeded,
+    lambda request, exc: JSONResponse({"error": "Rate limit exceeded"}),
+)
 app.add_middleware(SlowAPIMiddleware)
 
 
@@ -257,9 +273,11 @@ class RegisterRequest(BaseModel):
     phone: str | None = None
     password: str
 
+
 class LoginRequest(BaseModel):
     email: str
     password: str
+
 
 class OTP(Base):
     __tablename__ = "otp"
@@ -268,21 +286,24 @@ class OTP(Base):
     email = Column(String)
     otp_hash = Column(String)
     expires_at = Column(DateTime)
-    attempts = Column(Integer, default=0)        
-    created_at = Column(DateTime, default=datetime.utcnow)  
+    attempts = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class EmailSchema(BaseModel):
     email: EmailStr
+
 
 class ResetPasswordSchema(BaseModel):
     email: EmailStr
     token: str
     new_password: str
 
+
 class OTPVerifySchema(BaseModel):
-    email:EmailStr
-    otp:str
+    email: EmailStr
+    otp: str
+
 
 class OrderRequest(BaseModel):
     order_id: int
@@ -302,7 +323,11 @@ class OrderRequest(BaseModel):
 
 
 @app.post("/register")
-async def register(data: RegisterRequest, db: Session = Depends(get_db), background_tasks: BackgroundTasks = BackgroundTasks()):
+async def register(
+    data: RegisterRequest,
+    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
     try:
         existing = db.query(User).filter(User.email == data.email).first()
         if existing:
@@ -310,8 +335,13 @@ async def register(data: RegisterRequest, db: Session = Depends(get_db), backgro
                 verification_token = str(uuid.uuid4())
                 existing.verification_token = verification_token
                 db.commit()
-                background_tasks.add_task(send_verification_email, data.email, verification_token)
-                return {"error": "already_registered_unverified", "message": "Account exists but not verified. Verification email resent."}
+                background_tasks.add_task(
+                    send_verification_email, data.email, verification_token
+                )
+                return {
+                    "error": "already_registered_unverified",
+                    "message": "Account exists but not verified. Verification email resent.",
+                }
             return {"error": "User already exists"}
 
         verification_token = str(uuid.uuid4())
@@ -323,19 +353,20 @@ async def register(data: RegisterRequest, db: Session = Depends(get_db), backgro
             phone=data.phone,
             password=hash_password(data.password),
             api_key=None,
-            api_purchased = False,
+            api_purchased=False,
             api_enable=False,
             email_verified=False,
             verification_token=verification_token,
             is_admin=False,
             plan="free",
-            usage_count=0
+            usage_count=0,
         )
         db.add(new_user)
         db.commit()
 
-
-        background_tasks.add_task(send_verification_email, data.email, verification_token)
+        background_tasks.add_task(
+            send_verification_email, data.email, verification_token
+        )
 
         return {"message": "User registered successfully"}
 
@@ -345,33 +376,18 @@ async def register(data: RegisterRequest, db: Session = Depends(get_db), backgro
 
 
 @app.post("/login")
-async def login(
-    data: LoginRequest,
-    response: Response,
-    db: Session = Depends(get_db)
-):
+async def login(data: LoginRequest, response: Response, db: Session = Depends(get_db)):
 
     # Find user
-    user = db.query(User).filter(
-        User.email == data.email
-    ).first()
+    user = db.query(User).filter(User.email == data.email).first()
 
     # User not found
     if not user:
-        raise HTTPException(
-            status_code=404,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=404, detail="User not found")
 
     # Wrong password
-    if not verify_password(
-        data.password,
-        user.password
-    ):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid password"
-        )
+    if not verify_password(data.password, user.password):
+        raise HTTPException(status_code=401, detail="Invalid password")
 
     # Email not verified
     if not user.email_verified:
@@ -384,20 +400,14 @@ async def login(
         db.commit()
 
         # Resend verification email
-        await send_verification_email(
-            user.email,
-            verification_token
-        )
-    
+        await send_verification_email(user.email, verification_token)
+
         raise HTTPException(
-            status_code=403,
-            detail="Email not verified. Verification email sent again."
+            status_code=403, detail="Email not verified. Verification email sent again."
         )
 
     # Create JWT token
-    token = create_token({
-        "user_id": user.id
-    })
+    token = create_token({"user_id": user.id})
 
     # Set cookie
     response.set_cookie(
@@ -406,16 +416,16 @@ async def login(
         httponly=True,
         secure=True,
         samesite="none",
-        max_age=86400
+        max_age=86400,
     )
 
     return {
-    "message": "Login successful",
-    "token": token,
-    "role": user.role,
-    "plan": user.plan,
-    "user_id": user.id
-}
+        "message": "Login successful",
+        "token": token,
+        "role": user.role,
+        "plan": user.plan,
+        "user_id": user.id,
+    }
 
 
 @app.get("/verify-email/{token}")
@@ -423,7 +433,8 @@ def verify_email(token: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.verification_token == token).first()
 
     if not user:
-        return HTMLResponse(content="""
+        return HTMLResponse(
+            content="""
             <html><head><title>Verification Failed</title>
             <meta http-equiv="refresh" ;url=https://zrto-app.vercel.app/login" />
             <style>
@@ -437,7 +448,9 @@ def verify_email(token: str, db: Session = Depends(get_db)):
             <h2>Invalid or Expired Link</h2>
             <p>This verification link is invalid or has already been used.</p>
             <p>Redirecting you back...</p></div></body></html>
-        """, status_code=400)
+        """,
+            status_code=400,
+        )
 
     user.email_verified = True
     user.verification_token = None
@@ -465,16 +478,15 @@ def verify_email(token: str, db: Session = Depends(get_db)):
         </div></body></html>
     """)
 
+
 @app.get("/test-email")
 async def test_email():
     try:
-        await send_otp_email(
-            "ashokcivil27@gmail.com",
-            "123456"
-        )
+        await send_otp_email("ashokcivil27@gmail.com", "123456")
         return {"success": True}
     except Exception as e:
         return {"error": str(e)}
+
 
 @app.post("/send-otp")
 async def send_otp(data: EmailSchema, db: Session = Depends(get_db)):
@@ -502,7 +514,7 @@ async def send_otp(data: EmailSchema, db: Session = Depends(get_db)):
         otp_hash=hash_otp(otp),
         expires_at=datetime.utcnow() + timedelta(minutes=5),
         attempts=0,
-        created_at=datetime.utcnow()
+        created_at=datetime.utcnow(),
     )
     db.add(new_otp)
     db.commit()
@@ -538,12 +550,10 @@ def verify_otp(data: OTPVerifySchema, db: Session = Depends(get_db)):
     db.delete(record)
     db.commit()
 
-    token = create_token({
-        "email": data.email,
-        "type": "reset"
-    })
+    token = create_token({"email": data.email, "type": "reset"})
 
     return {"message": "OTP verified", "token": token}
+
 
 @app.post("/reset-password")
 def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
@@ -553,7 +563,6 @@ def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
     if not payload:
         return {"error": "Invalid or expired token"}
 
-   
     if payload.get("type") != "reset":
         return {"error": "Invalid token type"}
 
@@ -564,7 +573,6 @@ def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
     if not user:
         return {"error": "User not found"}
 
-  
     user.password = hash_password(data.new_password)
     db.commit()
 
@@ -573,11 +581,10 @@ def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
 
 @app.delete("/delete-account")
 def delete_account(
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user)
+    db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ):
     try:
-        
+
         db.query(APILog).filter(APILog.user_id == user.id).delete()
         db.query(Prediction).filter(Prediction.user_id == user.id).delete()
         db.query(User).filter(User.id == user.id).delete()
@@ -587,42 +594,43 @@ def delete_account(
         db.rollback()
         return {"error": str(e)}
 
+
 @app.get("/protected")
 def protected(user: User = Depends(get_current_user)):
     return {"message": "Authenticated", "user_id": user.id}
 
+
 @app.post("/create-order")
 def create_order():
-    order = client.order.create({
-        "amount": 499900, 
-        "currency": "INR",
-        "payment_capture": 1
-    })
-    return {
-        "id": order["id"],
-        "amount": order["amount"],
-        "currency": order["currency"]
-    }
+    order = client.order.create(
+        {"amount": 499900, "currency": "INR", "payment_capture": 1}
+    )
+    return {"id": order["id"], "amount": order["amount"], "currency": order["currency"]}
+
 
 @app.post("/verify-payment")
 async def verify_payment(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
 ):
     data = await request.json()
 
     try:
-       
-        client.utility.verify_payment_signature({
-            "razorpay_order_id": data.get("razorpay_order_id"),
-            "razorpay_payment_id": data.get("razorpay_payment_id"),
-            "razorpay_signature": data.get("razorpay_signature"),
-        })
 
-        existing = db.query(Payment).filter(
-            Payment.razorpay_payment_id == data.get("razorpay_payment_id")
-        ).first()
+        client.utility.verify_payment_signature(
+            {
+                "razorpay_order_id": data.get("razorpay_order_id"),
+                "razorpay_payment_id": data.get("razorpay_payment_id"),
+                "razorpay_signature": data.get("razorpay_signature"),
+            }
+        )
+
+        existing = (
+            db.query(Payment)
+            .filter(Payment.razorpay_payment_id == data.get("razorpay_payment_id"))
+            .first()
+        )
 
         if existing:
             return {"message": "Payment already processed"}
@@ -632,12 +640,11 @@ async def verify_payment(
             razorpay_order_id=data.get("razorpay_order_id"),
             razorpay_payment_id=data.get("razorpay_payment_id"),
             amount=499900,
-            status="success"
+            status="success",
         )
 
         db.add(payment)
 
-        
         user.plan = "pro"
         user.subscription_start = datetime.utcnow()
         user.subscription_end = datetime.utcnow() + timedelta(days=30)
@@ -650,9 +657,13 @@ async def verify_payment(
         print("Verification failed:", e)
         return {"error": "Invalid payment"}
 
+
 @app.get("/api/payments")
-def get_payments(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_payments(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
     return db.query(Payment).filter(Payment.user_id == current_user.id).all()
+
 
 @app.get("/")
 def home():
@@ -661,18 +672,8 @@ def home():
 
 @app.get("/usage")
 def get_usage(user: User = Depends(get_current_user)):
-    PLAN_LIMITS = {
-        "free": 50,
-        "pro": 5000
-
-
-
-        
-    }
-    return {
-         "used": user.usage_count,
-        "limit": PLAN_LIMITS.get(user.plan, 50)
-    }
+    PLAN_LIMITS = {"free": 50, "pro": 5000}
+    return {"used": user.usage_count, "limit": PLAN_LIMITS.get(user.plan, 50)}
 
 
 @app.post("/predict")
@@ -681,7 +682,7 @@ async def predict(
     request: Request,
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -689,10 +690,7 @@ async def predict(
     # ✅ check subscription
     check_and_update_subscription(user, db)
 
-    PLAN_LIMITS = {
-        "free": 50,
-        "pro": 5000
-    }
+    PLAN_LIMITS = {"free": 50, "pro": 5000}
 
     limit = PLAN_LIMITS.get(user.plan, 50)
 
@@ -722,7 +720,7 @@ async def predict(
                 "error": "free_limit_reached",
                 "message": "You have reached your monthly limit. Upgrade to continue.",
                 "used": used,
-                "limit": limit
+                "limit": limit,
             }
 
         if user.role != "admin" and total_rows > remaining:
@@ -730,14 +728,17 @@ async def predict(
                 "error": "batch_limit_exceeded",
                 "message": f"You can only process {remaining} more orders",
                 "remaining": remaining,
-                "fileHas": total_rows
+                "fileHas": total_rows,
             }
-
 
         # ✅ run prediction
         # df = predict_orders_df(df)
         # ✅ run prediction
         df = run_prediction_pipeline(df)
+
+        records = build_prediction_records(df)
+
+        batch_auto_verify(records, user_id=user.id)
 
         import json
 
@@ -751,8 +752,6 @@ async def predict(
         savings = float(
             df[df["decision"] == "BLOCK_COD"]["order_value"].sum() * 0.6 * 0.5
         )
-        
-        
 
         # ✅ save summary
         prediction = Prediction(
@@ -763,7 +762,7 @@ async def predict(
             verify_orders=len(df[df["decision"] == "VERIFY"]),
             safe_orders=len(df[df["decision"] == "ALLOW"]),
             potential_savings=savings,
-            result_json=result_json
+            result_json=result_json,
         )
 
         db.add(prediction)
@@ -778,7 +777,7 @@ async def predict(
                 order_id=str(row["order_id"]),
                 risk_level=row["risk_level"],
                 decision=row["decision"],
-                order_value=float(row["order_value"])
+                order_value=float(row["order_value"]),
             )
             db.add(prediction_log)
 
@@ -798,15 +797,13 @@ async def predict(
             "verify_orders": int(len(df[df["decision"] == "VERIFY"])),
             "safe_orders": int(len(df[df["decision"] == "ALLOW"])),
             "potential_savings": savings,
-            "download_url": f"/download/{unique_id}"
+            "download_url": f"/download/{unique_id}",
         }
 
     except Exception as e:
         print("Error:", e)
         log(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-    
-
 
 
 # @app.get("/download/{file_path:path}")
@@ -819,19 +816,21 @@ async def predict(
 
 @app.get("/download/{file_id}")
 def download_file(
-    file_id: str,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    file_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
-    prediction = db.query(Prediction).filter(
-        Prediction.file_id == file_id,
-        Prediction.user_id == user.id
-    ).first()
+    prediction = (
+        db.query(Prediction)
+        .filter(Prediction.file_id == file_id, Prediction.user_id == user.id)
+        .first()
+    )
 
     if not prediction or not prediction.result_json:
         return JSONResponse(
             status_code=404,
-            content={"error": "file_missing", "message": "File no longer available. Please run prediction again."}
+            content={
+                "error": "file_missing",
+                "message": "File no longer available. Please run prediction again.",
+            },
         )
 
     df = pd.read_json(prediction.result_json)
@@ -842,16 +841,14 @@ def download_file(
     return StreamingResponse(
         io.BytesIO(csv_buffer.getvalue().encode()),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=prediction_results.csv"}
+        headers={"Content-Disposition": "attachment; filename=prediction_results.csv"},
     )
 
 
 @app.post("/api/predict-order")
 @limiter.limit("60/minute")
 def predict_single_order(
-    request: Request,
-    order: OrderRequest,
-    db: Session = Depends(get_db)
+    request: Request, order: OrderRequest, db: Session = Depends(get_db)
 ):
 
     api_key = order.api_key
@@ -863,11 +860,10 @@ def predict_single_order(
     if not user:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    
     if not user.api_purchased:
         raise HTTPException(
             status_code=403,
-            detail="API access not purchased. Please upgrade your plan."
+            detail="API access not purchased. Please upgrade your plan.",
         )
 
     if not user.api_enable:
@@ -881,10 +877,21 @@ def predict_single_order(
     df = run_prediction_pipeline(df)
 
     feature_cols = [
-        'is_cod', 'is_new_customer', 'previous_rto_flag', 'many_payment_attempts',
-        'cod_high_value', 'order_value', 'estimated_delivery_days', 'address_quality',
-        'rto_rate_customer', 'pincode_risk', 'courier_performance', 'city_risk',
-        'device_risk', 'channel_risk', 'day_risk'
+        "is_cod",
+        "is_new_customer",
+        "previous_rto_flag",
+        "many_payment_attempts",
+        "cod_high_value",
+        "order_value",
+        "estimated_delivery_days",
+        "address_quality",
+        "rto_rate_customer",
+        "pincode_risk",
+        "courier_performance",
+        "city_risk",
+        "device_risk",
+        "channel_risk",
+        "day_risk",
     ]
 
     X = df[feature_cols]
@@ -897,32 +904,26 @@ def predict_single_order(
         user_id=user.id,
         order_id=str(order.order_id),
         risk_score=float(prob),
-        decision=decision
+        decision=decision,
     )
     db.add(log_entry)
     db.commit()
 
-    return {"risk_score": float(prob), "decision": decision, }
+    return {
+        "risk_score": float(prob),
+        "decision": decision,
+    }
 
 
 @app.get("/api/key")
 def get_api_key(user: User = Depends(get_current_user)):
     if not user.api_purchased:
-        return {
-            "api_purchased": False,
-            "api_key": None,
-            "enabled": False
-        }
-    return {
-        "api_purchased": True,
-        "api_key": user.api_key,
-        "enabled": user.api_enable
-    }
+        return {"api_purchased": False, "api_key": None, "enabled": False}
+    return {"api_purchased": True, "api_key": user.api_key, "enabled": user.api_enable}
+
 
 @app.get("/api/me")
-def get_current_user_data(
-    current_user: User = Depends(get_current_user)
-):
+def get_current_user_data(current_user: User = Depends(get_current_user)):
     return {
         "first_name": current_user.first_name,
         "last_name": current_user.last_name,
@@ -931,8 +932,9 @@ def get_current_user_data(
         "email": current_user.email,
         "plan": current_user.plan,
         "role": current_user.role,
-        "expiry": current_user.subscription_end
+        "expiry": current_user.subscription_end,
     }
+
 
 # @app.post("/early-access")
 # def create_early_access(data: dict, db: Session = Depends(get_db)):
@@ -950,19 +952,27 @@ def get_current_user_data(
 
 
 @app.post("/api/regenerate-key")
-def regenerate_key(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def regenerate_key(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
     user.api_key = str(uuid.uuid4())
     db.commit()
     return {"message": "API key regenerated", "api_key": user.api_key}
 
+
 @app.post("/api/key/disable")
-def disable_api_key(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def disable_api_key(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
     user.api_enable = False
     db.commit()
     return {"message": "API key disabled"}
 
+
 @app.post("/api/key/enable")
-def enable_api_key(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def enable_api_key(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
     user.api_enable = True
     db.commit()
     return {"message": "API key enabled"}
@@ -971,7 +981,16 @@ def enable_api_key(user: User = Depends(get_current_user), db: Session = Depends
 @app.get("/api/logs")
 def get_logs(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     logs = db.query(APILog).filter(APILog.user_id == user.id).all()
-    return [{"order_id": l.order_id, "risk_score": l.risk_score, "decision": l.decision, "time": l.created_at} for l in logs]
+    return [
+        {
+            "order_id": l.order_id,
+            "risk_score": l.risk_score,
+            "decision": l.decision,
+            "time": l.created_at,
+        }
+        for l in logs
+    ]
+
 
 @app.get("/api/admin/stats")
 def admin_stats(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -987,8 +1006,9 @@ def admin_stats(user: User = Depends(get_current_user), db: Session = Depends(ge
         "total_users": total_users,
         "total_predictions": total_predictions,
         "total_payments": total_payments,
-        "total_revenue": total_revenue
+        "total_revenue": total_revenue,
     }
+
 
 @app.get("/api/admin/users")
 def get_users(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -1003,10 +1023,11 @@ def get_users(user: User = Depends(get_current_user), db: Session = Depends(get_
             "email": u.email,
             "plan": u.plan,
             "usage": u.usage_count,
-            "created": u.id  # or created_at if exists
+            "created": u.id,  # or created_at if exists
         }
         for u in users
     ]
+
 
 @app.get("/api/admin/leads")
 def get_leads(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -1020,7 +1041,7 @@ def get_leads(user: User = Depends(get_current_user), db: Session = Depends(get_
             "name": l.full_name,
             "email": l.email,
             "brand": l.brand_name,
-            "orders": l.monthly_orders   # ✅ FIXED
+            "orders": l.monthly_orders,  # ✅ FIXED
         }
         for l in leads
     ]
@@ -1039,7 +1060,7 @@ def export_leads(user: User = Depends(get_current_user), db: Session = Depends(g
             "Email": l.email,
             "Brand": l.brand_name,
             "Orders": l.monthly_orders,
-            "Phone": l.phone
+            "Phone": l.phone,
         }
         for l in leads
     ]
@@ -1053,14 +1074,21 @@ def export_leads(user: User = Depends(get_current_user), db: Session = Depends(g
 
 
 @app.get("/api/stats")
-def get_user_stats(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_user_stats(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
     from sqlalchemy import func
-    totals = db.query(
-        func.sum(Prediction.risky_orders),
-        func.sum(Prediction.verify_orders),
-        func.sum(Prediction.safe_orders),
-        func.sum(Prediction.potential_savings)
-    ).filter(Prediction.user_id == user.id).first()
+
+    totals = (
+        db.query(
+            func.sum(Prediction.risky_orders),
+            func.sum(Prediction.verify_orders),
+            func.sum(Prediction.safe_orders),
+            func.sum(Prediction.potential_savings),
+        )
+        .filter(Prediction.user_id == user.id)
+        .first()
+    )
 
     return {
         "total_predictions": user.usage_count,
@@ -1068,30 +1096,51 @@ def get_user_stats(user: User = Depends(get_current_user), db: Session = Depends
         "verify_orders": int(totals[1] or 0),
         "safe_orders": int(totals[2] or 0),
         "plan": user.plan,
-        "expiry": user.subscription_end
+        "expiry": user.subscription_end,
     }
+
 
 @app.get("/api/history")
 def get_history(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    logs = db.query(APILog).filter(APILog.user_id == user.id).order_by(APILog.created_at.desc()).all()
-    return [{"order_id": l.order_id, "risk_score": l.risk_score, "decision": l.decision, "time": l.created_at} for l in logs]
+    logs = (
+        db.query(APILog)
+        .filter(APILog.user_id == user.id)
+        .order_by(APILog.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "order_id": l.order_id,
+            "risk_score": l.risk_score,
+            "decision": l.decision,
+            "time": l.created_at,
+        }
+        for l in logs
+    ]
+
 
 @app.get("/api/prediction-history")
-def prediction_history(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    history = db.query(Prediction).filter(Prediction.user_id == user.id).order_by(Prediction.created_at.desc()).all()
+def prediction_history(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    history = (
+        db.query(Prediction)
+        .filter(Prediction.user_id == user.id)
+        .order_by(Prediction.created_at.desc())
+        .all()
+    )
     return [
-        {"created_at": p.created_at,
+        {
+            "created_at": p.created_at,
             "total_orders": p.total_orders,
             "risky_orders": p.risky_orders,
             "verify_orders": p.verify_orders,
             "safe_orders": p.safe_orders,
             "potential_savings": p.potential_savings,
-            "file_id": p.file_id,   
-
-            
-            } 
-             for p in history
-            ]
+            "file_id": p.file_id,
+        }
+        for p in history
+    ]
 
 
 @app.get("/admin/analytics")
@@ -1099,12 +1148,14 @@ def admin_required(current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     return current_user
+
+
 def admin_analytics(
-    current_user: User = Depends(admin_required),
-    db: Session = Depends(get_db)):
-     
+    current_user: User = Depends(admin_required), db: Session = Depends(get_db)
+):
+
     if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Access denied") 
+        raise HTTPException(status_code=403, detail="Access denied")
     # Total users
     total_users = db.query(User).count()
 
@@ -1116,15 +1167,15 @@ def admin_analytics(
 
     # Today predictions
     today = datetime.utcnow().date()
-    today_predictions = db.query(Prediction).filter(
-        Prediction.created_at >= today
-    ).count()
+    today_predictions = (
+        db.query(Prediction).filter(Prediction.created_at >= today).count()
+    )
 
     # Weekly predictions
     last_week = datetime.utcnow() - timedelta(days=7)
-    weekly_predictions = db.query(Prediction).filter(
-        Prediction.created_at >= last_week
-    ).count()
+    weekly_predictions = (
+        db.query(Prediction).filter(Prediction.created_at >= last_week).count()
+    )
 
     # Payments
     paid_users = db.query(Payment).filter(Payment.status == "paid").count()
@@ -1134,10 +1185,8 @@ def admin_analytics(
         "total_users": total_users,
         "total_predictions": total_predictions,
         "total_savings": total_savings,
-
         "today_predictions": today_predictions,
         "weekly_predictions": weekly_predictions,
-
         "paid_users": paid_users,
         "pending_payments": pending_payments,
     }
@@ -1145,51 +1194,66 @@ def admin_analytics(
 
 @app.get("/status/{job_id}")
 def check_status(job_id: str):
-    return {"status": "completed" if os.path.exists(f"output_{job_id}.csv") else "processing"}
+    return {
+        "status": (
+            "completed" if os.path.exists(f"output_{job_id}.csv") else "processing"
+        )
+    }
+
 
 class EarlyAccessRequest(BaseModel):
     full_name: str
     email: str
     brand_name: str
     order_volume: str
- 
+
+
 @app.post("/early-access")
 async def early_access(data: EarlyAccessRequest):
     try:
         import resend
+
         resend.api_key = os.getenv("RESEND_API_KEY")
-        resend.Emails.send({
-            "from": os.getenv("MAIL_FROM", "onboarding@resend.dev"),
-            "to": os.getenv("MAIL_FROM"),
-            "subject": f"🚀 New Early Access Request — {data.brand_name}",
-            "html": f"""<h2>New Early Access Request</h2>
+        resend.Emails.send(
+            {
+                "from": os.getenv("MAIL_FROM", "onboarding@resend.dev"),
+                "to": os.getenv("MAIL_FROM"),
+                "subject": f"🚀 New Early Access Request — {data.brand_name}",
+                "html": f"""<h2>New Early Access Request</h2>
             <p><b>Name:</b> {data.full_name}</p>
             <p><b>Email:</b> {data.email}</p>
             <p><b>Brand:</b> {data.brand_name}</p>
-            <p><b>Volume:</b> {data.order_volume}</p>"""
-        })
-        return {"message": "Application received! We'll be in touch within 24-48 hours."}
+            <p><b>Volume:</b> {data.order_volume}</p>""",
+            }
+        )
+        return {
+            "message": "Application received! We'll be in touch within 24-48 hours."
+        }
     except Exception as e:
         print("EARLY ACCESS ERROR:", e)
         return {"error": str(e)}
- 
+
+
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
 
+
 @app.post("/change-password")
-def change_password(data: ChangePasswordRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def change_password(
+    data: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     if not verify_password(data.current_password, user.password):
         return {"error": "Current password is incorrect"}
     user.password = hash_password(data.new_password)
     db.commit()
     return {"message": "Password changed successfully"}
 
+
 @app.post("/api/purchase")
-def purchase_api(
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+def purchase_api(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if user.api_purchased:
         return {"error": "You already have API access"}
 
@@ -1199,10 +1263,8 @@ def purchase_api(
     user.api_enable = True
     db.commit()
 
-    return {
-        "message": "API access activated successfully!",
-        "api_key": user.api_key
-    }
+    return {"message": "API access activated successfully!", "api_key": user.api_key}
+
 
 @app.post("/payment/confirm")
 def confirm_payment(data: dict, db: Session = Depends(get_db)):
@@ -1218,6 +1280,7 @@ def confirm_payment(data: dict, db: Session = Depends(get_db)):
 
     return {"message": "API access activated"}
 
+
 @app.get("/api/admin/payments")
 def get_payments(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if user.role != "admin":
@@ -1230,7 +1293,7 @@ def get_payments(user: User = Depends(get_current_user), db: Session = Depends(g
             "user_id": p.user_id,
             "amount": p.amount,
             "payment_id": p.razorpay_payment_id,
-            "date": p.created_at
+            "date": p.created_at,
         }
         for p in payments
     ]
@@ -1240,6 +1303,7 @@ def get_payments(user: User = Depends(get_current_user), db: Session = Depends(g
 def admin_data(admin: User = Depends(get_admin_user)):
     return {"message": "Admin only data"}
 
+
 @app.get("/me")
 def get_me(user: User = Depends(get_current_user)):
     return {
@@ -1248,8 +1312,9 @@ def get_me(user: User = Depends(get_current_user)):
         "id": user.id,
         "email": user.email,
         "role": user.role,
-        "plan": user.plan
+        "plan": user.plan,
     }
+
 
 @app.on_event("startup")
 def startup():
@@ -1258,4 +1323,5 @@ def startup():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
