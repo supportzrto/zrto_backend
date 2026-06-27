@@ -47,8 +47,16 @@ def send_whatsapp(body: SendWhatsAppRequest, db: Session = Depends(get_db)):
 
 @router.get("/api/webhooks/whatsapp")
 @router.get("/webhooks/whatsapp")
-def verify_webhook(request: Request, db: Session = Depends(get_db)):
-    return PlainTextResponse(content=request.query_params.get("hub.challenge", ""))
+def verify_webhook(request: Request):
+
+    mode = request.query_params.get("hub.mode")
+    token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge")
+
+    if mode == "subscribe" and token == config.WHATSAPP_VERIFY_TOKEN:
+        return PlainTextResponse(challenge)
+
+    raise HTTPException(status_code=403, detail="Verification failed")
 
 @router.post("/api/webhooks/whatsapp")
 @router.post("/webhooks/whatsapp")
