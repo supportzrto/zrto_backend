@@ -66,9 +66,19 @@ def send_interactive_message(
             )
             if resp.status_code in (200, 201):
                 return resp.json()
+            print("=" * 60)
+            print("URL:", url)
+            print("PHONE NUMBER ID:", phone_number_id)
+            print("TOKEN START:", access_token[:25])
+            print("TOKEN LENGTH:", len(access_token))
+            print("STATUS:", resp.status_code)
+            print("META RESPONSE:", resp.text)
+            print("=" * 60)
             if 400 <= resp.status_code < 500:
                 raise WhatsAppAPIError(
-                    f"Client error {resp.status_code}", resp.status_code, resp.text
+                    f"Client error {resp.status_code}: {resp.text}",
+                    resp.status_code,
+                    resp.text,
                 )
             last_exc = WhatsAppAPIError(
                 f"Server error {resp.status_code}", resp.status_code, resp.text
