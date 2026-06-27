@@ -6,6 +6,7 @@ from database import SessionLocal
 from whatsapp import config, service
 from whatsapp.models import Brand, VerificationOrder
 from whatsapp.schemas import BrandCreate, BrandUpdate, ManualActionRequest, OrderCreate, PredictRiskRequest, ReminderRequest, SendWhatsAppRequest
+import traceback
 
 router = APIRouter(tags=["whatsapp"])
 
@@ -17,9 +18,14 @@ def get_db():
 @router.post("/api/orders")
 def create_order(data: OrderCreate, db: Session = Depends(get_db)):
     order = service.create_order(db, data)
+
     if data.auto_verify and service.should_verify(order.risk_category):
-        try: service.send_verification(db, order)
-        except Exception: pass
+        try:
+            service.send_verification(db, order)
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=str(e))
+
     return {"order": order.to_dict()}
 
 @router.get("/api/orders")
