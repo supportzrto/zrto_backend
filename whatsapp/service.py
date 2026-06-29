@@ -95,7 +95,7 @@ def send_verification(db: Session, order: VerificationOrder) -> dict:
         phone_number_id=brand.whatsapp_phone_number_id,
         access_token=brand.whatsapp_access_token,
         to=order.phone_number,
-        template_name=brand.template_name,
+        template_name="zrto_order_verification",
         customer_name=order.customer_name,
         order_id=order.order_id,
         order_amount=order.order_amount,
