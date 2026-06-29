@@ -103,6 +103,8 @@ def send_template_message(
 
     url = f"{config.GRAPH_API_BASE}/{config.GRAPH_API_VERSION}/{phone_number_id}/messages"
 
+    access_token = access_token.strip()
+
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
