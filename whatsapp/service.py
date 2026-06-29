@@ -147,12 +147,20 @@ def handle_webhook(db: Session, payload: dict) -> dict:
             val = change.get("value", {})
             for msg in val.get("messages", []):
                 wamid = msg.get("id")
+                
                 reply_id = None
+
+# Interactive reply
                 if (
                     msg.get("type") == "interactive"
                     and msg.get("interactive", {}).get("type") == "button_reply"
                 ):
+                    
                     reply_id = msg["interactive"]["button_reply"]["id"]
+
+# Template quick reply button
+                elif msg.get("type") == "button":
+                    reply_id = msg["button"]["payload"]
                 if not reply_id or _already_processed(db, f"reply:{wamid}"):
                     continue
                 order = (
@@ -168,7 +176,7 @@ def handle_webhook(db: Session, payload: dict) -> dict:
                 if not order:
                     continue
 
-                if reply_id == config.BTN_CONFIRM_ID:
+                if reply_id in (config.BTN_CONFIRM_ID, "Confirm Order"):
                     (
                         order.verification_status,
                         order.order_status,
@@ -178,7 +186,7 @@ def handle_webhook(db: Session, payload: dict) -> dict:
                         config.OrderStatus.CONFIRMED,
                         "Confirm Order",
                     )
-                elif reply_id == config.BTN_CANCEL_ID:
+                elif reply_id in (config.BTN_CANCEL_ID, "Cancel Order"):
                     (
                         order.verification_status,
                         order.order_status,
