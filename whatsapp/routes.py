@@ -67,7 +67,9 @@ def verify_webhook(request: Request):
 @router.post("/api/webhooks/whatsapp")
 @router.post("/webhooks/whatsapp")
 async def receive_webhook(request: Request, db: Session = Depends(get_db)):
+    print("🔥🔥🔥 WEBHOOK RECEIVED 🔥🔥🔥")
     payload = await request.json()
+    print(payload)
     service.handle_webhook(db, payload)
     return JSONResponse(content={"ok": True})
 
