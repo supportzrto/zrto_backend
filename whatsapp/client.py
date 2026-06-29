@@ -139,6 +139,13 @@ def send_template_message(
         }
     }
 
+    print("=" * 60)
+    print("URL:", url)
+    print("STATUS:", resp.status_code)
+    print("RESPONSE:", resp.text)
+    print("PAYLOAD:", payload)
+    print("=" * 60)
+
     resp = requests.post(
         url,
         headers=headers,
@@ -146,12 +153,7 @@ def send_template_message(
         timeout=config.HTTP_TIMEOUT_SECONDS,
     )
 
-    print("=" * 60)
-    print("URL:", url)
-    print("STATUS:", resp.status_code)
-    print("RESPONSE:", resp.text)
-    print("PAYLOAD:", payload)
-    print("=" * 60)
+    
 
     if resp.status_code not in (200, 201):
         raise WhatsAppAPIError(
