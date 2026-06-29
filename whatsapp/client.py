@@ -121,28 +121,18 @@ def send_template_message(
                 {
                     "type": "body",
                     "parameters": [
-                        {
-                            "type": "text",
-                            "text": customer_name
-                        },
-                        {
-                            "type": "text",
-                            "text": order_id
-                        },
-                        {
-                            "type": "text",
-                            "text": str(order_amount)
-                        }
+                        {"type": "text", "text": customer_name},
+                        {"type": "text", "text": order_id},
+                        {"type": "text", "text": str(order_amount)}
                     ]
                 }
             ]
         }
     }
 
+    # Print request before sending
     print("=" * 60)
     print("URL:", url)
-    print("STATUS:", resp.status_code)
-    print("RESPONSE:", resp.text)
     print("PAYLOAD:", payload)
     print("=" * 60)
 
@@ -153,7 +143,11 @@ def send_template_message(
         timeout=config.HTTP_TIMEOUT_SECONDS,
     )
 
-    
+    # Print response after sending
+    print("=" * 60)
+    print("STATUS:", resp.status_code)
+    print("RESPONSE:", resp.text)
+    print("=" * 60)
 
     if resp.status_code not in (200, 201):
         raise WhatsAppAPIError(
