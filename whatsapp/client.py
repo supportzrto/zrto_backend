@@ -89,3 +89,68 @@ def send_interactive_message(
             time.sleep(config.HTTP_RETRY_BACKOFF_SECONDS * attempt)
 
     raise last_exc or WhatsAppAPIError("Request failed")
+
+def send_template_message(
+    *,
+    phone_number_id: str,
+    access_token: str,
+    to: str,
+    template_name: str,
+    customer_name: str,
+    order_id: str,
+    order_amount: float,
+):
+
+    url = f"{config.GRAPH_API_BASE}/{config.GRAPH_API_VERSION}/{phone_number_id}/messages"
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {
+                "code": "en"
+            },
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [
+                        {
+                            "type": "text",
+                            "text": customer_name
+                        },
+                        {
+                            "type": "text",
+                            "text": order_id
+                        },
+                        {
+                            "type": "text",
+                            "text": str(order_amount)
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+    resp = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=config.HTTP_TIMEOUT_SECONDS,
+    )
+
+    if resp.status_code not in (200, 201):
+        raise WhatsAppAPIError(
+            f"Client error {resp.status_code}",
+            resp.status_code,
+            resp.text,
+        )
+
+    return resp.json()
