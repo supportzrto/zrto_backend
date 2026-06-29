@@ -147,6 +147,10 @@ def send_template_message(
 
     # Print response after sending
     print("=" * 60)
+    print("URL:", url)
+    print("PHONE NUMBER ID:", phone_number_id)
+    print("TOKEN START:", access_token[:30])
+    print("TOKEN LENGTH:", len(access_token))
     print("STATUS:", resp.status_code)
     print("RESPONSE:", resp.text)
     print("=" * 60)
