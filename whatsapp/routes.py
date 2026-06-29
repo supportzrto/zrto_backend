@@ -65,16 +65,20 @@ def verify_webhook(request: Request):
 
     raise HTTPException(status_code=403, detail="Verification failed")
 
-@router.post("/api/webhooks/whatsapp")
 @router.post("/webhooks/whatsapp")
+@router.post("/api/webhooks/whatsapp")
 async def receive_webhook(request: Request, db: Session = Depends(get_db)):
-    print("🔥🔥🔥 WEBHOOK RECEIVED 🔥🔥🔥")
+    body = await request.body()
+
+    print("=" * 80)
+    print(body.decode("utf-8"))
+    print("=" * 80)
+
     payload = await request.json()
-    print("=" * 80)
-    print(json.dumps(payload, indent=2))
-    print("=" * 80)
+
     service.handle_webhook(db, payload)
-    return JSONResponse(content={"ok": True})
+
+    return {"ok": True}
 
 @router.get("/api/dashboard")
 def dashboard(brand_id: int = Query(None), db: Session = Depends(get_db)):
