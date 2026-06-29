@@ -7,6 +7,7 @@ from whatsapp import config, service
 from whatsapp.models import Brand, VerificationOrder
 from whatsapp.schemas import BrandCreate, BrandUpdate, ManualActionRequest, OrderCreate, PredictRiskRequest, ReminderRequest, SendWhatsAppRequest
 import traceback
+import json
 
 router = APIRouter(tags=["whatsapp"])
 
@@ -69,7 +70,9 @@ def verify_webhook(request: Request):
 async def receive_webhook(request: Request, db: Session = Depends(get_db)):
     print("🔥🔥🔥 WEBHOOK RECEIVED 🔥🔥🔥")
     payload = await request.json()
-    print(payload)
+    print("=" * 80)
+    print(json.dumps(payload, indent=2))
+    print("=" * 80)
     service.handle_webhook(db, payload)
     return JSONResponse(content={"ok": True})
 
