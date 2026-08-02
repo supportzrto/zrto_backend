@@ -5,8 +5,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
-MAIL_FROM = os.getenv("MAIL_FROM", "support.zrto@gmail.com")
-BACKEND_URL = os.getenv("BACKEND_URL", "https://zrtobackend-production.up.railway.app")
+MAIL_FROM = os.getenv("MAIL_FROM", "zrtosupport@gmail.com")
+BACKEND_URL = os.getenv("BACKEND_URL", "https://api-zrto.up.railway.app")
 
 async def send_email(to: str, subject: str, html: str):
     async with httpx.AsyncClient() as client:

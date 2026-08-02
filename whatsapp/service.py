@@ -95,7 +95,7 @@ def send_verification(db: Session, order: VerificationOrder) -> dict:
         phone_number_id=brand.whatsapp_phone_number_id,
         access_token=brand.whatsapp_access_token,
         to=order.phone_number,
-        template_name="zrto_order_verification",
+        template_name=config.INITIAL_TEMPLATE_NAME,
         customer_name=order.customer_name,
         order_id=order.order_id,
         order_amount=order.order_amount,
@@ -113,14 +113,59 @@ def send_reminder(db: Session, order: VerificationOrder) -> dict:
     brand = db.query(Brand).filter(Brand.id == order.brand_id).first()
     if not brand or not brand.whatsapp_enabled:
         raise WhatsAppAPIError("Brand disabled")
-    resp = send_interactive_message(
-        phone_number_id=brand.whatsapp_phone_number_id,
-        access_token=brand.whatsapp_access_token,
-        to=order.phone_number,
-        body_text=render_template(
-            brand.reminder_template or config.DEFAULT_REMINDER_TEMPLATE, order
-        ),
-    )
+
+    resp = None
+    last_error = None
+
+    # 1) Preferred: a dedicated approved reminder template (works any time, no session window).
+    try:
+        resp = send_template_message(
+            phone_number_id=brand.whatsapp_phone_number_id,
+            access_token=brand.whatsapp_access_token,
+            to=order.phone_number,
+            template_name=config.REMINDER_TEMPLATE_NAME,
+            customer_name=order.customer_name,
+            order_id=order.order_id,
+            order_amount=order.order_amount,
+        )
+    except WhatsAppAPIError as exc:
+        last_error = exc
+
+    # 2) Fallback: reuse the initial verification template if the reminder template
+    # hasn't been created/approved yet in Meta Business Manager.
+    if resp is None:
+        try:
+            resp = send_template_message(
+                phone_number_id=brand.whatsapp_phone_number_id,
+                access_token=brand.whatsapp_access_token,
+                to=order.phone_number,
+                template_name=config.INITIAL_TEMPLATE_NAME,
+                customer_name=order.customer_name,
+                order_id=order.order_id,
+                order_amount=order.order_amount,
+            )
+        except WhatsAppAPIError as exc:
+            last_error = exc
+
+    # 3) Last resort: free-form interactive message. Only deliverable if the customer
+    # has messaged the business within the last 24h (session window), but worth trying
+    # rather than failing outright.
+    if resp is None:
+        try:
+            resp = send_interactive_message(
+                phone_number_id=brand.whatsapp_phone_number_id,
+                access_token=brand.whatsapp_access_token,
+                to=order.phone_number,
+                body_text=render_template(
+                    brand.reminder_template or config.DEFAULT_REMINDER_TEMPLATE, order
+                ),
+            )
+        except WhatsAppAPIError as exc:
+            last_error = exc
+
+    if resp is None:
+        raise last_error or WhatsAppAPIError("Reminder failed")
+
     msg_id = resp["messages"][0]["id"] if "messages" in resp else None
     order.reminder_message_id = msg_id
     order.reminder_sent_time = datetime.utcnow()
@@ -145,6 +190,15 @@ def handle_webhook(db: Session, payload: dict) -> dict:
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):
             val = change.get("value", {})
+            # Which brand's WhatsApp number actually received this event.
+            incoming_phone_number_id = val.get("metadata", {}).get("phone_number_id")
+            brand = None
+            if incoming_phone_number_id:
+                brand = (
+                    db.query(Brand)
+                    .filter(Brand.whatsapp_phone_number_id == incoming_phone_number_id)
+                    .first()
+                )
             for msg in val.get("messages", []):
                 wamid = msg.get("id")
                 
@@ -163,16 +217,17 @@ def handle_webhook(db: Session, payload: dict) -> dict:
                     reply_id = msg["button"]["payload"]
                 if not reply_id or _already_processed(db, f"reply:{wamid}"):
                     continue
-                order = (
-                    db.query(VerificationOrder)
-                    .filter(
-                        VerificationOrder.phone_number == msg.get("from"),
-                        VerificationOrder.verification_status
-                        == config.VerificationStatus.PENDING,
-                    )
-                    .order_by(VerificationOrder.message_sent_time.desc())
-                    .first()
+                order_q = db.query(VerificationOrder).filter(
+                    VerificationOrder.phone_number == msg.get("from"),
+                    VerificationOrder.verification_status
+                    == config.VerificationStatus.PENDING,
                 )
+                # Scope to the brand that owns the number this reply arrived on,
+                # so two brands verifying the same customer phone number at the
+                # same time can't get their orders cross-matched.
+                if brand:
+                    order_q = order_q.filter(VerificationOrder.brand_id == brand.id)
+                order = order_q.order_by(VerificationOrder.message_sent_time.desc()).first()
                 if not order:
                     continue
 
@@ -300,10 +355,12 @@ def manual_action(db: Session, order: VerificationOrder, action: str) -> dict:
     return {"order_status": order.order_status}
 
 
-def dashboard_metrics(db: Session, brand_id: int = None) -> dict:
+def dashboard_metrics(db: Session, brand_id: int = None, brand_ids: list = None) -> dict:
     q = db.query(VerificationOrder)
     if brand_id:
         q = q.filter(VerificationOrder.brand_id == brand_id)
+    elif brand_ids is not None:
+        q = q.filter(VerificationOrder.brand_id.in_(brand_ids))
     orders = q.all()
     v = sum(
         1 for o in orders if o.verification_status == config.VerificationStatus.VERIFIED
@@ -343,7 +400,48 @@ def dashboard_metrics(db: Session, brand_id: int = None) -> dict:
     }
 
 
-def analytics(db: Session, brand_id: int = None) -> dict:
-    return dashboard_metrics(
-        db, brand_id
-    )  # Simplify for space, frontend uses these keys
+def analytics(db: Session, brand_id: int = None, brand_ids: list = None, days: int = 14) -> dict:
+    metrics = dashboard_metrics(db, brand_id, brand_ids)
+
+    q = db.query(VerificationOrder)
+    if brand_id:
+        q = q.filter(VerificationOrder.brand_id == brand_id)
+    elif brand_ids is not None:
+        q = q.filter(VerificationOrder.brand_id.in_(brand_ids))
+    orders = q.all()
+
+    risk_distribution = {"LOW": 0, "MEDIUM": 0, "HIGH": 0}
+    for o in orders:
+        cat = (o.risk_category or "LOW").upper()
+        if cat in risk_distribution:
+            risk_distribution[cat] += 1
+
+    since = datetime.utcnow() - timedelta(days=days)
+    daily = {}
+    for i in range(days + 1):
+        day = (since + timedelta(days=i)).date().isoformat()
+        daily[day] = {"label": day, "verified": 0, "rejected": 0, "no_response": 0}
+
+    for o in orders:
+        ref_time = o.response_time or o.message_sent_time or o.created_at
+        if not ref_time or ref_time < since:
+            continue
+        day = ref_time.date().isoformat()
+        if day not in daily:
+            continue
+        if o.verification_status == config.VerificationStatus.VERIFIED:
+            daily[day]["verified"] += 1
+        elif o.verification_status == config.VerificationStatus.REJECTED:
+            daily[day]["rejected"] += 1
+        elif o.verification_status == config.VerificationStatus.NO_RESPONSE:
+            daily[day]["no_response"] += 1
+
+    resolved = metrics["verified_orders"] + metrics["rejected_orders"] + metrics["no_response_orders"]
+    cancellation_rate = round((metrics["rejected_orders"] / resolved) * 100, 2) if resolved else 0.0
+    no_response_rate = round((metrics["no_response_orders"] / resolved) * 100, 2) if resolved else 0.0
+
+    metrics["risk_distribution"] = risk_distribution
+    metrics["daily_verifications"] = list(daily.values())
+    metrics["cancellation_rate"] = cancellation_rate
+    metrics["no_response_rate"] = no_response_rate
+    return metrics

@@ -40,23 +40,20 @@ def send_interactive_message(
     }
     payload = {
         "messaging_product": "whatsapp",
+        "recipient_type": "individual",
         "to": to,
-        "type": "text",
-        "text": {"body": "ZRTO backend test"},
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {"text": body_text},
+            "action": {
+                "buttons": [
+                    {"type": "reply", "reply": {"id": config.BTN_CONFIRM_ID, "title": config.BTN_CONFIRM_TITLE}},
+                    {"type": "reply", "reply": {"id": config.BTN_CANCEL_ID, "title": config.BTN_CANCEL_TITLE}},
+                ]
+            },
+        },
     }
-    # payload = {
-    #     "messaging_product": "whatsapp", "recipient_type": "individual", "to": to,
-    #     "type": "interactive",
-    #     "interactive": {
-    #         "type": "button", "body": {"text": body_text},
-    #         "action": {
-    #             "buttons": [
-    #                 {"type": "reply", "reply": {"id": config.BTN_CONFIRM_ID, "title": config.BTN_CONFIRM_TITLE}},
-    #                 {"type": "reply", "reply": {"id": config.BTN_CANCEL_ID, "title": config.BTN_CANCEL_TITLE}}
-    #             ]
-    #         }
-    #     }
-    # }
 
     last_exc = None
     for attempt in range(1, config.HTTP_MAX_RETRIES + 1):

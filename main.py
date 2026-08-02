@@ -253,7 +253,7 @@ cleanup_thread.start()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "https://zrto-app.vercel.app"],
+    allow_origins=["http://localhost:5173", "https://zrto.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -439,7 +439,7 @@ def verify_email(token: str, db: Session = Depends(get_db)):
         return HTMLResponse(
             content="""
             <html><head><title>Verification Failed</title>
-            <meta http-equiv="refresh" ;url=https://zrto-app.vercel.app/login" />
+            <meta http-equiv="refresh" content="3;url=https://zrto.vercel.app/login" />
             <style>
                 body { font-family: Arial, sans-serif; display: flex; justify-content: center;
                        align-items: center; height: 100vh; margin: 0; background: #f5f5f5; }
@@ -462,7 +462,7 @@ def verify_email(token: str, db: Session = Depends(get_db)):
 
     return HTMLResponse(content="""
         <html><head><title>Email Verified</title>
-        <meta http-equiv="refresh" content="3;url=https://zrto-app.vercel.app/login" />
+        <meta http-equiv="refresh" content="3;url=https://zrto.vercel.app/login" />
         <style>
             body { font-family: Arial, sans-serif; display: flex; justify-content: center;
                    align-items: center; height: 100vh; margin: 0; background: #f5f5f5; }

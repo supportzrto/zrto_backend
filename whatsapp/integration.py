@@ -9,14 +9,19 @@ def auto_verify_from_prediction(db: Session, *, brand_id: int, order_id: str, cu
     if not (brand_id and customer_name and phone_number): return {"verification": "skipped"}
     brand = db.query(Brand).filter(Brand.id == brand_id).first()
     if not brand or not brand.whatsapp_enabled: return {"verification": "skipped"}
-    
+
     score = service.normalise_risk_score(probability=probability, risk_score=risk_score)
     category = (risk_category or "").upper()
     if category not in ("LOW", "MEDIUM", "HIGH"): category = service.categorise_risk(score)
-    
-    order = service.create_order(db, OrderCreate(order_id=str(order_id), brand_id=brand_id, customer_name=customer_name, phone_number=phone_number, order_amount=float(order_amount or 0), risk_score=score, risk_category=category, auto_verify=False))
-    
+
+    # Only the ambiguous MEDIUM band goes through WhatsApp verification (matches
+    # predict.py's decision(): HIGH is auto-blocked/converted to prepaid, LOW is
+    # auto-allowed — neither needs a customer confirmation, so we don't create a
+    # dashboard record that would otherwise sit "pending" forever.
     if not service.should_verify(category): return {"verification": "not_required"}
+
+    order = service.create_order(db, OrderCreate(order_id=str(order_id), brand_id=brand_id, customer_name=customer_name, phone_number=phone_number, order_amount=float(order_amount or 0), risk_score=score, risk_category=category, auto_verify=False))
+
     try:
         service.send_verification(db, order)
         return {"verification": "sent"}
@@ -26,14 +31,18 @@ def auto_verify_from_prediction(db: Session, *, brand_id: int, order_id: str, cu
 def build_prediction_records(df) -> list:
     records = []
     for _, row in df.iterrows():
-        lvl = str(row.get("risk_level", "")).upper()
-        if lvl not in ("MEDIUM", "HIGH"): continue
+        # 'VERIFY' is set by predict.py's decision() only for MEDIUM risk orders —
+        # HIGH is auto-blocked/converted to prepaid, LOW is auto-allowed, neither
+        # needs a WhatsApp check.
+        decision = str(row.get("decision", "")).upper()
+        if decision != "VERIFY":
+            continue
         phone = row.get("phone_number") or row.get("phone")
         name = row.get("customer_name") or row.get("name")
         if not phone or not name: continue
         records.append({
             "order_id": str(row.get("order_id")), "order_value": float(row.get("order_value", 0)),
-            "risk_score": float(row.get("risk_score", 0)) * 100.0, "risk_category": lvl,
+            "risk_score": float(row.get("risk_score", 0)) * 100.0, "risk_category": str(row.get("risk_level", "MEDIUM")).upper(),
             "phone_number": str(phone), "customer_name": str(name), "brand_id": row.get("brand_id")
         })
     return records
