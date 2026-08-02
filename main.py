@@ -268,6 +268,18 @@ app.add_exception_handler(
 app.add_middleware(SlowAPIMiddleware)
 
 
+@app.get("/debug-cors")
+def debug_cors():
+    return {
+        "allowed_origins": ["http://localhost:5173", "https://zrto.vercel.app"],
+        "git_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown"),
+        "git_branch": os.getenv("RAILWAY_GIT_BRANCH", "unknown"),
+        "deployment_id": os.getenv("RAILWAY_DEPLOYMENT_ID", "unknown"),
+        "service_id": os.getenv("RAILWAY_SERVICE_ID", "unknown"),
+        "environment": os.getenv("RAILWAY_ENVIRONMENT_NAME", "unknown"),
+    }
+
+
 class RegisterRequest(BaseModel):
     first_name: str
     last_name: str
